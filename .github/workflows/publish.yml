@@ -38,19 +38,47 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          EXISTING=$(gh api graphql -f query='
-            query($owner: String!, $name: String!) {
-              repository(owner: $owner, name: $name) {
-                discussions(first: 100) {
-                  nodes { id body }
-                }
-              }
-            }' -f owner="${{ github.repository_owner }}" -f name="${{ github.event.repository.name }}")
+          ALL_DISCUSSIONS=""
+          CURSOR=""
+          while true; do
+            if [ -z "$CURSOR" ]; then
+              PAGE=$(gh api graphql -f query='
+                query($owner: String!, $name: String!) {
+                  repository(owner: $owner, name: $name) {
+                    discussions(first: 100) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes { id body }
+                    }
+                  }
+                }' -f owner="${{ github.repository_owner }}" -f name="${{ github.event.repository.name }}")
+            else
+              PAGE=$(gh api graphql -f query='
+                query($owner: String!, $name: String!, $after: String!) {
+                  repository(owner: $owner, name: $name) {
+                    discussions(first: 100, after: $after) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes { id body }
+                    }
+                  }
+                }' -f owner="${{ github.repository_owner }}" -f name="${{ github.event.repository.name }}" -f after="$CURSOR")
+            fi
+            NODES=$(echo "$PAGE" | jq -c '.data.repository.discussions.nodes')
+            if [ -z "$ALL_DISCUSSIONS" ]; then
+              ALL_DISCUSSIONS="$NODES"
+            else
+              ALL_DISCUSSIONS=$(echo "$ALL_DISCUSSIONS$NODES" | jq -sc '.[0] + .[1]')
+            fi
+            HAS_NEXT=$(echo "$PAGE" | jq -r '.data.repository.discussions.pageInfo.hasNextPage')
+            if [ "$HAS_NEXT" != "true" ]; then
+              break
+            fi
+            CURSOR=$(echo "$PAGE" | jq -r '.data.repository.discussions.pageInfo.endCursor')
+          done
 
           for file in ${{ steps.deleted.outputs.files }}; do
             FILENAME=$(basename "$file")
             echo "Deleting discussion for: $FILENAME"
-            DISCUSSION_ID=$(echo "$EXISTING" | jq -r --arg src "<!-- source: ${FILENAME} -->" '.data.repository.discussions.nodes[] | select(.body | contains($src)) | .id' | head -1)
+            DISCUSSION_ID=$(echo "$ALL_DISCUSSIONS" | jq -r --arg src "<!-- source: ${FILENAME} -->" '.[] | select(.body | contains($src)) | .id' | head -1)
             if [ -n "$DISCUSSION_ID" ] && [ "$DISCUSSION_ID" != "null" ]; then
               echo "Deleting discussion: $DISCUSSION_ID"
               gh api graphql -f query='mutation($discId: ID!) { deleteDiscussion(input: {id: $discId}) { discussion { id } } }' -f discId="$DISCUSSION_ID"
@@ -77,14 +105,42 @@ jobs:
 
           RAW_URL="https://raw.githubusercontent.com/${{ github.repository }}/main"
 
-          EXISTING=$(gh api graphql -f query='
-            query($owner: String!, $name: String!) {
-              repository(owner: $owner, name: $name) {
-                discussions(first: 100) {
-                  nodes { id body }
-                }
-              }
-            }' -f owner="${{ github.repository_owner }}" -f name="${{ github.event.repository.name }}")
+          ALL_DISCUSSIONS=""
+          CURSOR=""
+          while true; do
+            if [ -z "$CURSOR" ]; then
+              PAGE=$(gh api graphql -f query='
+                query($owner: String!, $name: String!) {
+                  repository(owner: $owner, name: $name) {
+                    discussions(first: 100) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes { id body }
+                    }
+                  }
+                }' -f owner="${{ github.repository_owner }}" -f name="${{ github.event.repository.name }}")
+            else
+              PAGE=$(gh api graphql -f query='
+                query($owner: String!, $name: String!, $after: String!) {
+                  repository(owner: $owner, name: $name) {
+                    discussions(first: 100, after: $after) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes { id body }
+                    }
+                  }
+                }' -f owner="${{ github.repository_owner }}" -f name="${{ github.event.repository.name }}" -f after="$CURSOR")
+            fi
+            NODES=$(echo "$PAGE" | jq -c '.data.repository.discussions.nodes')
+            if [ -z "$ALL_DISCUSSIONS" ]; then
+              ALL_DISCUSSIONS="$NODES"
+            else
+              ALL_DISCUSSIONS=$(echo "$ALL_DISCUSSIONS$NODES" | jq -sc '.[0] + .[1]')
+            fi
+            HAS_NEXT=$(echo "$PAGE" | jq -r '.data.repository.discussions.pageInfo.hasNextPage')
+            if [ "$HAS_NEXT" != "true" ]; then
+              break
+            fi
+            CURSOR=$(echo "$PAGE" | jq -r '.data.repository.discussions.pageInfo.endCursor')
+          done
 
           for file in ${{ steps.changed.outputs.files }}; do
             if [ -f "$file" ]; then
@@ -101,7 +157,7 @@ jobs:
 
               echo "Processing: $TITLE (file: $FILENAME)"
 
-              DISCUSSION_ID=$(echo "$EXISTING" | jq -r --arg src "<!-- source: ${FILENAME} -->" '.data.repository.discussions.nodes[] | select(.body | contains($src)) | .id' | head -1)
+              DISCUSSION_ID=$(echo "$ALL_DISCUSSIONS" | jq -r --arg src "<!-- source: ${FILENAME} -->" '.[] | select(.body | contains($src)) | .id' | head -1)
 
               if [ -n "$DISCUSSION_ID" ] && [ "$DISCUSSION_ID" != "null" ]; then
                 echo "Updating existing discussion: $DISCUSSION_ID"
