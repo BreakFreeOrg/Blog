@@ -23,7 +23,7 @@ jobs:
       - name: Get changed md files
         id: changed
         run: |
-          FILES=$(git diff-tree --no-commit-id --name-only -r HEAD | grep '\.md$' || true)
+          FILES=$(git diff-tree --root --no-commit-id --name-only -r HEAD | grep '\.md$' || true)
           echo "files=$FILES" >> $GITHUB_OUTPUT
 
       - name: Publish to Discussions
