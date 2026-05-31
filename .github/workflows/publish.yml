@@ -57,7 +57,7 @@ jobs:
               CONTENT=$(cat "$file")
               CONTENT=$(echo "$CONTENT" | sed "s|](\./attachments/|](${RAW_URL}/.attachments/|g")
               CONTENT=$(echo "$CONTENT" | sed "s|](\.attachments/|](${RAW_URL}/.attachments/|g")
-              CONTENT="<!-- source: ${FILENAME} -->\n${CONTENT}"
+              CONTENT="$(printf '<!-- source: %s -->\n%s' "$FILENAME" "$CONTENT")"
 
               echo "Processing: $TITLE (file: $FILENAME)"
 
